@@ -1,0 +1,21 @@
+#!/bin/sh
+
+# Adapted from https://github.com/juxt/edge/blob/master/bin/uberjar
+
+set -eux
+
+export build_data="$(mktemp -d)"
+trap 'rm -rf "$build_data";' EXIT
+
+cli_name=kubeedn
+main_class=kubeedn.main
+
+clojure -e \
+'(binding [*compile-path* (System/getenv "build_data")]
+  (compile (symbol "kubeedn.main")))'
+
+native-image -cp $(clojure -Spath):${build_data} \
+             --report-unsupported-elements-at-runtime \
+             "$main_class" "$@"
+
+mv "$main_class" "$cli_name"
