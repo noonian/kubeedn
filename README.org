@@ -1,84 +1,90 @@
 #+TITLE: EDN based templating for Kubernetes
 #+AUTHOR: Jed Clinger
+#+STARTUP: indent
 
-Write kubernetes manifests with edn. Currently just translates edn
-into yaml and prints to standard out.
+Manage kubernetes resources declaratively with edn.
 
-Alpha status - API subject to change at any time.
+Pre-alpha status - API subject to change at any time.
 
-This project is experimental and uses [[https://www.graalvm.org/][GraalVM]] to compile Clojure into
-a native executable.
+Experimental project using [[https://www.graalvm.org/][GraalVM]] to compile Clojure into a native
+executable to achieve tolerable performace as a command line tool.
 
 * Motivation
 
-  I'm not a big fan of yaml or json but I am fan of [[https://github.com/edn-format/edn][edn]]. If you
-  haven't heard of edn before, you can think of it as a data format
-  similar to json and yaml. Edn originates from the Clojure
-  programming language and Clojure code is written in a superset of
-  edn.
+Distributing services with kubernetes eventually requires some form of
+templating and [[https://github.com/helm/helm][helm]] is fast becoming a popular choice for this
+task. Helm uses a text-based templating system similar to mustache to
+render yaml files. By text-based I mean that the templates are treated
+as large strings and processed before being read as yaml. The
+templating also supports some [[https://docs.helm.sh/chart_template_guide/#template-functions-and-pipelines][functions and a unix pipe-like syntax
+for composing them]]. This is known as an external [[https://martinfowler.com/books/dsl.htm][domain specific
+language (DSL)]] becuase the templating language uses a completely
+custom language (not YAML).
 
-  After writing kubernetes manifests for a while, I tired of writing
-  and editing yaml and I missed the concision of edn and it's lack of
-  ambiguity. With yaml I sometimes have to look up syntax for
-  different forms of quoting, lists, etc. and I don't always know how
-  an unquoted value will be interpreted.
+[[https://github.com/edn-format/edn][Edn]] is a data format with many features that make it uniquely suited
+to writing domain specific languages. Edn supports more types than
+json and yaml as well as a tag system for user extension.
 
-  Hopefully I'll be able to write kubenetes manifests in edn for the
-  forseable future!
+Kubeedn is an experiment. It is a thin wrapper around [[https://kubernetes.io/docs/reference/kubectl/kubectl/][kubectl]] that
+enables authoring kubernetes configurations via edn.
 
 * Building
 
-  You need the following tools installed:
-  - Java
-  - [[https://clojure.org/guides/getting_started][Clojure tools cli]]
-  - [[https://www.graalvm.org/][GraalVM]] (=native-image= must be available in =$PATH=)
-  - make
+You need the following tools installed:
+- Java
+- [[https://clojure.org/guides/getting_started][Clojure tools cli]]
+- [[https://www.graalvm.org/][GraalVM]] (=native-image= must be available in =$PATH=)
+- make
+- [[https://kubernetes.io/docs/reference/kubectl/kubectl/][kubectl]] (only required at runtime)
 
-  Build the binary with
+Build the binary with
 
-  #+BEGIN_SRC sh
-    make native-image
-  #+END_SRC
+#+BEGIN_SRC sh
+  make native-image
+#+END_SRC
 
-  You can also run the code using the clojure cli.
+You can also run the code using the clojure cli.
 
-  #+BEGIN_SRC sh :results value verbatim :exports both
-    clojure -m kubeedn.main --help
-  #+END_SRC
+#+BEGIN_SRC sh :results value verbatim :exports both
+  clojure -m kubeedn.main --help
+#+END_SRC
 
-  #+RESULTS:
-  #+begin_example
-  NAME:
-   kubeedn - Write kubernetes manifests with edn
+#+RESULTS:
+#+begin_example
+NAME:
+ kubeedn - Write kubernetes manifests with edn
 
-  USAGE:
-   kubeedn [global-options] command [command options] [arguments...]
+USAGE:
+ kubeedn [global-options] command [command options] [arguments...]
 
-  VERSION:
-   0.0.1-SNAPSHOT
+VERSION:
+ 0.0.1-SNAPSHOT
 
-  COMMANDS:
-     transform, xf        Transforms edn to yaml
+COMMANDS:
+   transform, xf        Transforms edn to yaml
+   apply, a             Kubectl apply after preprocessing with kubeedn
 
-  GLOBAL OPTIONS:
-     -?, --help
+GLOBAL OPTIONS:
+   -?, --help
 
-  #+end_example
+#+end_example
 
 * Usage
 
-  The only thing implemented is a =transform= command that converts
-  edn files directly into yaml and prints the yaml to standard out.
+Currely only supports running on a single files. Directories will
+likely be supported in the future.
 
-  These examples assume they are run from this toplevel
-  directory. They also assume you have =kubectl= available and
-  configured to talk to a kubernetes cluster. The example manifest
-  also requires support for services of type "LoadBalancer".
+** Transform
 
-  The simplest usage is to view generated yaml for an edn manifest. In
-  [[file:manifests/nginx.edn][manifests/nginx.edn]] you will find some resources similar to this:
+These examples assume they are run from this directory. They also
+assume you have =kubectl= available and configured to talk to a
+kubernetes cluster. The example manifest also requires support for
+services of type "LoadBalancer".
 
-  #+BEGIN_SRC clojure
+The simplest usage is to view generated yaml for an edn manifest. In
+[[file:manifests/nginx.edn][manifests/nginx.edn]] you will find some resources similar to this:
+
+#+BEGIN_SRC clojure
     {:apiVersion "apps/v1"
      :kind "Deployment"
      :metadata {:name "kubeedn-nginx"
@@ -89,12 +95,12 @@ a native executable.
                        :spec {:containers [{:name "nginx"
                                             :image "nginx:1.7.9"
                                             :ports [{:containerPort 80}]}]}}}}
-  #+END_SRC
+#+END_SRC
 
-  I've shown a single object, but you can have multiple by placing
-  them inside an edn vector.
+I've shown a single object, but you can have multiple by placing
+them inside an edn vector.
 
-  #+BEGIN_SRC clojure
+#+BEGIN_SRC clojure
     [
      {;; ...
       :apiVersion "apps/v1"
@@ -103,122 +109,191 @@ a native executable.
       :apiVersion "v1"
       :kind "Service"}
      ]
-  #+END_SRC
+#+END_SRC
 
-  This will translate into multiple yaml objects separated by "\n---\n".
+This will translate into multiple yaml objects separated by "\n---\n".
 
-  #+BEGIN_SRC sh :results output code :wrap "SRC yaml" :exports both
-    ./kubeedn transform -f manifests/nginx.edn
-  #+END_SRC
+#+BEGIN_SRC sh :results output code :wrap "SRC yaml" :exports both
+    kubeedn transform -f manifests/nginx.edn
+#+END_SRC
 
-  #+RESULTS:
-  #+BEGIN_SRC yaml
-  apiVersion: apps/v1
-  kind: Deployment
-  metadata:
-    name: kubeedn-nginx
-    labels: {app: kubeedn-nginx}
-  spec:
-    selector:
-      matchLabels: {app: kubeedn-nginx}
-    minReadySeconds: 5
-    template:
-      metadata:
-        labels: {app: kubeedn-nginx}
-      spec:
-        containers:
-        - name: nginx
-          image: nginx:1.7.9
-          ports:
-          - {containerPort: 80}
+#+RESULTS:
+#+BEGIN_SRC yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeedn-nginx
+  labels: {app: kubeedn-nginx}
+spec:
+  selector:
+    matchLabels: {app: kubeedn-nginx}
+  minReadySeconds: 5
+  template:
+    metadata:
+      labels: {app: kubeedn-nginx}
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.7.9
+        ports:
+        - {containerPort: 80}
 
-  ---
-  apiVersion: v1
-  kind: Service
-  metadata:
-    name: kubeedn-nginx
-    labels: {app: kubeedn-nginx}
-  spec:
-    type: LoadBalancer
-    ports:
-    - {port: 80, protocol: TCP}
-    selector: {app: kubeedn-nginx}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubeedn-nginx
+  labels: {app: kubeedn-nginx}
+spec:
+  type: LoadBalancer
+  ports:
+  - {port: 80, protocol: TCP}
+  selector: {app: kubeedn-nginx}
 
-  #+END_SRC
+#+END_SRC
 
-  Ok, lets redirect the output to a file and create the objects in a
-  cluster with =kubectl=. =xf= is a shorter alias for =transform=.
+Ok, lets redirect the output to a file and create the objects in a
+cluster with =kubectl=. =xf= is a shorter alias for =transform=.
 
-  #+BEGIN_SRC sh :results value verbatim :exports both
-    ./kubeedn xf -f manifests/nginx.edn > nginx.yaml
+#+BEGIN_SRC sh :results value verbatim :exports both
+    kubeedn xf -f manifests/nginx.edn > nginx.yaml
     kubectl apply -f nginx.yaml
-  #+END_SRC
+#+END_SRC
 
-  #+RESULTS:
-  : deployment.apps/kubeedn-nginx created
-  : service/kubeedn-nginx created
+#+RESULTS:
+: deployment.apps/kubeedn-nginx created
+: service/kubeedn-nginx created
 
-  We'll delete the resources to reset our state for the next example.
+We'll delete the resources to reset our state for the next example.
 
-  #+BEGIN_SRC sh :results value verbatim :exports both
+#+BEGIN_SRC sh :results value verbatim :exports both
     kubectl delete -f nginx.yaml
-  #+END_SRC
+#+END_SRC
 
-  #+RESULTS:
-  : deployment.apps "kubeedn-nginx" deleted
-  : service "kubeedn-nginx" deleted
+#+RESULTS:
+: deployment.apps "kubeedn-nginx" deleted
+: service "kubeedn-nginx" deleted
 
-  You can also pipe the output from =kubeedn= directly to =kubectl
-  apply -f= since =kubectl= supports reading from stdin.
+You can also pipe the output from =kubeedn= directly to =kubectl
+apply -f= since =kubectl= supports reading from stdin.
 
-  #+BEGIN_SRC sh :results value verbatim :exports both
-    ./kubeedn xf -f manifests/nginx.edn | kubectl apply -f -
-  #+END_SRC
+#+BEGIN_SRC sh :results value verbatim :exports both
+    kubeedn xf -f manifests/nginx.edn | kubectl apply -f -
+#+END_SRC
 
-  #+RESULTS:
-  : deployment.apps/kubeedn-nginx created
-  : service/kubeedn-nginx created
+#+RESULTS:
+: deployment.apps/kubeedn-nginx created
+: service/kubeedn-nginx created
 
-  And deleting them again.
+And deleting them again.
 
-  #+BEGIN_SRC sh :results value verbatim :exports both
-    ./kubeedn xf -f manifests/nginx.edn | kubectl delete -f -
-  #+END_SRC
+#+BEGIN_SRC sh :results value verbatim :exports both
+    kubeedn xf -f manifests/nginx.edn | kubectl delete -f -
+#+END_SRC
 
-  #+RESULTS:
-  : deployment.apps "kubeedn-nginx" deleted
-  : service "kubeedn-nginx" deleted
+#+RESULTS:
+: deployment.apps "kubeedn-nginx" deleted
+: service "kubeedn-nginx" deleted
+
+** Apply
+
+Wrapper for `kubectl apply`.
+
+#+BEGIN_SRC sh :results value verbatim :exports both
+  kubeedn apply -f manifests/nginx.edn
+#+END_SRC
+
+#+RESULTS:
+: deployment.apps/kubeedn-nginx created
+: service/kubeedn-nginx created
+
+And deleting them. Using transform becuase delete is not implemented yet.
+
+#+BEGIN_SRC sh :results value verbatim :exports both
+    kubeedn xf -f manifests/nginx.edn | kubectl delete -f -
+#+END_SRC
+
+#+RESULTS:
+: deployment.apps "kubeedn-nginx" deleted
+: service "kubeedn-nginx" deleted
+
+You can pass extra flags directly to =kubectl= using the =--kubectl=
+flag.
+
+#+BEGIN_SRC sh :results value verbatim :exports both
+  kubeedn apply -f manifests/nginx.edn --kubectl '--prune -l app=kubeedn-nginx'
+#+END_SRC
+
+#+RESULTS:
+: deployment.apps/kubeedn-nginx created
+: service/kubeedn-nginx created
+
+One lovely feature of edn is the prefix tag =#_= that comments out an
+entire form. You can use this to easily comment out an entire
+resource. Combined with the =--prune= flag you can make =kubectl=
+behave similarly to terraform where it will "clean up" any resources
+that are no longer required.
+
+The service is commented out in [[./manifests/nginx-no-service.edn]].
+
+#+BEGIN_SRC clojure
+  [{:apiVersion "apps/v1"
+    :kind "Deployment"
+    :metadata {:name "kubeedn-nginx"
+               :labels {:app "kubeedn-nginx"}}
+    :spec {:selector {:matchLabels {:app "kubeedn-nginx"}}
+           :minReadySeconds 5
+           :template {:metadata {:labels {:app "kubeedn-nginx"}}
+                      :spec {:containers [{:name "nginx"
+                                           :image "nginx:1.7.9"
+                                           :ports [{:containerPort 80}]}]}}}}
+   #_{:apiVersion "v1"
+    :kind "Service"
+    :metadata {:name "kubeedn-nginx"
+               :labels {:app "kubeedn-nginx"}}
+    :spec {:type "LoadBalancer"
+           :ports [{:port 80 :protocol "TCP"}]
+           :selector {:app "kubeedn-nginx"}}}]
+#+END_SRC
+
+#+BEGIN_SRC sh :results value verbatim :exports both
+  kubeedn apply -f manifests/nginx-no-service.edn --kubectl '--prune -l app=kubeedn-nginx'
+#+END_SRC
+
+#+RESULTS:
+: deployment.apps/kubeedn-nginx unchanged
+: service/kubeedn-nginx pruned
 
 * Roadmap
 
-  Some things I'm considering implementing:
+Some things I'm considering implementing:
 
-  - [ ] directories of edn manifests
-  - [ ] pass through commands to =kubectl= (e.g. =apply=)
-  - [ ] chart-like "packages" configured with edn
-  - [ ] functionality via edn tags
+- [ ] directories of edn manifests (only single file supported currently)
+- [X] pass through commands to =kubectl= (e.g. =apply=)
+- [ ] chart-like "packages" configured with edn
+- [ ] functionality via edn tags and embedded lispy scripting language
 
 * License
 
-  The MIT License (MIT)
+The MIT License (MIT)
 
-  Copyright © 2018 Jedidiah T Clinger
+Copyright © 2018 Jedidiah T Clinger
 
-  Permission is hereby granted, free of charge, to any person
-  obtaining a copy of this software and associated documentation files
-  (the "Software"), to deal in the Software without restriction,
-  including without limitation the rights to use, copy, modify, merge,
-  publish, distribute, sublicense, and/or sell copies of the Software,
-  and to permit persons to whom the Software is furnished to do so,
-  subject to the following conditions:
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation files
+(the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of the Software,
+and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
 
-  The above copyright notice and this permission notice shall be
-  included in all copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
 
-  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN

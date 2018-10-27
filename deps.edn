@@ -4,4 +4,4 @@
                              #_"1.10.0-alpha6"}
         io.forward/yaml {:mvn/version "1.0.9"}
         cli-matic {:git/url "https://github.com/l3nz/cli-matic.git"
-                   :sha "b27bc676a879542b4e83f1bef3b9776e600018e3"}}}
+                   :sha "52347d19a09259b215a7e9b62770a1447d2499b2"}}}
